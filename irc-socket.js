@@ -7,37 +7,17 @@
  * Send messages to server with .raw(String) method.
  */
 
-var EventEmitter = require("events").EventEmitter;
-var inspect = require("util").inspect;
-var format = require("util").format;
-var Promise = require("bluebird");
-var rresult = require("r-result");
-var Ok = rresult.Ok;
-var Fail = rresult.Fail;
+const EventEmitter = require("events").EventEmitter;
+const format = require("util").format;
+const rresult = require("r-result");
+const Ok = rresult.Ok;
+const Fail = rresult.Fail;
 
-var intoPropertyDescriptors = function (object) {
-    Object.keys(object).forEach(function (key) {
-        object[key] = { value: object[key] };
-    });
-
-    return object;
-};
-
-var includes = function (array, value) {
+const includes = function (array, value) {
     return array.indexOf(value) !== -1;
 };
 
-var pick = function (object, keys) {
-    var newObject = Object.create(Object.getPrototypeOf(object));
-
-    Object.keys(object)
-    .filter(function (key) { return includes(keys, key); })
-    .forEach(function (key) { newObject[key] = object[key]; });
-
-    return newObject;
-};
-
-var copyJsonMaybe = function (object) {
+const copyJsonMaybe = function (object) {
     if (!object) {
         return undefined;
     }
@@ -45,360 +25,385 @@ var copyJsonMaybe = function (object) {
     return JSON.parse(JSON.stringify(object));
 };
 
-var endsWith = function (string, postfix) {
+const endsWith = function (string, postfix) {
     return string.lastIndexOf(postfix) === string.length - postfix.length;
 };
 
-var failures = {
-    killed: {},
-    nicknamesUnavailable: {},
-    badProxyConfiguration: {},
-    missingRequiredCapabilities: {},
-    badPassword: {},
-    socketEnded: {}
+const failures = {
+    killed: 'killed',
+    nicknamesUnavailable: 'nicknames unavailable',
+    badProxyConfiguration: 'bad proxy configuration',
+    missingRequiredCapabilities: 'missing required capabilities',
+    badPassword: 'bad password',
+    socketEnded: 'socket ended'
 };
 
-var Socket = module.exports = function Socket (config, netSocket) {
-    var socket = Object.create(Socket.prototype);
+class IrcSocket extends EventEmitter {
+    constructor(config, netSocket) {
+        super();
+        // Internal implementation values.
+        this.impl = netSocket || config.socket;
+        // status := ["initialized", "connecting", "starting", "running", "closed"]
+        this.status = "initialized";
+        this.pending = true;
+        this.startupPromise = new Promise((resolve, reject) => {
+            this.resolvePromise = (res) => {
+                this.pending = false;
+                resolve(res);
+            };
+            this.rejectPromise = (res) => {
+                this.pending = false;
+                reject(res);
+            }
+        });
 
-    // Internal implementation values.
-    socket.impl = netSocket || config.socket;
-    // status := ["initialized", "connecting", "starting", "running", "closed"]
-    socket.status = "initialized";
-    socket.startupPromise = new Promise(function (resolve, reject) {
-        socket.resolvePromise = resolve;
-        socket.rejectPromise = reject;
-    });
+        // IRC Connection Handshake Options
+        this.proxy = config.proxy;
+        this.password = config.password;
+        this.capabilities = copyJsonMaybe(config.capabilities)
+        if (config.saslPassword) {
+            this.saslUsername = config.saslUsername || config.username;
+            this.saslPassword = config.saslPassword;
+        }
+        this.username = config.username;
+        this.realname = config.realname;
+        this.nicknames = config.nicknames.slice();
+        this.timeout = config.timeout || 5 * 60 * 1000;
 
-    // IRC Connection Handshake Options
-    socket.proxy = config.proxy;
-    socket.password = config.password;
-    socket.capabilities = copyJsonMaybe(config.capabilities);
-    socket.username = config.username;
-    socket.realname = config.realname;
-    socket.nicknames = config.nicknames.slice();
+        this.connectOptions = typeof config.connectOptions === "object" ? Object.create(config.connectOptions) : {};
+        this.connectOptions.port = config.port || 6667;
+        this.connectOptions.host = config.server;
 
-    socket.connectOptions = typeof config.connectOptions === "object" ? Object.create(config.connectOptions) : {};
-    socket.connectOptions.port = config.port || 6667;
-    socket.connectOptions.host = config.server;
 
-    // Socket Timeout variables.
-    // After five minutes without a server response, send a PONG.
-    // If the server doesn't PING back (or send any message really)
-    // within five minutes, we'll have assumed we've be DQed, and
-    // end the socket.
-    var timeout = null;
-    var timeoutPeriod = config.timeout || 5 * 60 * 1000;
-    var onSilence = function () {
-        timeout = setTimeout(onNoPong, timeoutPeriod);
-        socket.raw("PING :ignored");
-    };
-    var onNoPong = function () {
-        socket.emit("timeout");
-    };
+        this.on("data", function (line) {
+            if (line.slice(0, 4) === "PING") {
+                // On PING, respond with a PONG so that we stay connected.
+                this.raw(["PONG", line.slice(line.indexOf(":"))]);
+            }
+        });
 
-    // Data event handling.
-    // Transforms the raw stream of data events into a stream of
-    // one complete line per data event.
-    // Also handles timeouts.
-    var dataHandler = function () {
-        var emitLine = socket.emit.bind(socket, "data");
-        var lastLine = "";
+        this.on("timeout", function () {
+            this.end();
+        });
+    }
 
-        var onData = function (data) {
-            // The data event will occassionally only be partially
-            // complete. The last line will not end with "\r\n", and
-            // need to be appended to the beginning of the first line.
-            //
-            // If the last line in the data is complete, then lastLine
-            // will be set to an empty string, and appending an empty
-            // string to a string does nothing.
-            var lines = data.split("\r\n");
-            lines[0] = lastLine + lines[0];
-            lastLine = lines.pop();
-            lines.forEach(function (line) {
-              emitLine(line.normalize());
-            });
+    static connectFailures = failures;
 
-            // We've got data. Reset the timeout.
-            clearTimeout(timeout);
+    _setHandlers() {
+        // Socket Timeout variables.
+        // After five minutes without a server response, send a PONG.
+        // If the server doesn't PING back (or send any message really)
+        // within five minutes, we'll have to assume we've been DQed, and
+        // end the socket.
+        let timeout = null;
+        const timeoutPeriod = this.timeout;
+        const onSilence = () => {
+            timeout = setTimeout(onNoPong, timeoutPeriod);
+            this.raw("PING :ignored");
+        };
+        const onNoPong = () => {
+            this.emit("timeout");
+        };
+
+        // Data event handling.
+        // Transforms the raw stream of data events into a stream of
+        // one complete line per data event.
+        // Also handles timeouts.
+        (() => {
+            const emitLine = this.emit.bind(this, "data");
+            let lastLine = "";
+
+            const onData = (data) => {
+                // The data event will occassionally only be partially
+                // complete. The last line will not end with "\r\n", and
+                // need to be appended to the beginning of the first line.
+                //
+                // If the last line in the data is complete, then lastLine
+                // will be set to an empty string, and appending an empty
+                // string to a string does nothing.
+                let lines = data.split("\r\n");
+                lines[0] = lastLine + lines[0];
+                lastLine = lines.pop();
+                lines.forEach(function (line) {
+                    emitLine(line.normalize());
+                });
+
+                // We've got data. Reset the timeout.
+                clearTimeout(timeout);
+                timeout = setTimeout(onSilence, timeoutPeriod);
+            };
+
+            this.connection.on("data", onData);
+        })();
+
+        this.connection.once('connect', () => {
+            // Once connected, do the following:
+            // 1. Send WEBIRC if proxy set.
+            // 2. Send PASS if set.
+            // 3. Do capabilities negotiations if set.
+            // 4. Send USER
+            // 5. Send NICK until one is accepted.
+            // 6. Resolve startupPromise.
+            // TODO(Havvy): Refactor and clean up!!!
+
+            // If `this.end()` is called before the connect event
+            // fires, then we ignore the connect event, since we are
+            // already ending/ended.
+            if (!this.pending) { return; }
+            this.status = "starting";
+            this.emit("connect");
             timeout = setTimeout(onSilence, timeoutPeriod);
-        };
+            let serverCapabilities, acknowledgedCapabilities, sentRequests, respondedRequests, allRequestsSent, nickname;
 
-        socket.impl.on("data", onData);
-    }();
+            if (this.capabilities) {
+                this.capabilities.requires = this.capabilities.requires || [];
+                this.capabilities.wants = this.capabilities.wants || [];
+                // this.capabilities.requires.push('account-notify');
+                // this.capabilities.requires.push('away-notify');
+                // this.capabilities.requires.push('cap-notify');
+                // this.capabilities.requires.push('chghost');
+                // this.capabilities.requires.push('extended-join');
+                // this.capabilities.requires.push('multi-prefix');
 
-    socket.on("data", function (line) {
-        if (line.slice(0, 4) === "PING") {
-            // On PING, respond with a PONG so that we stay connected.
-            socket.raw(["PONG", line.slice(line.indexOf(":"))]);
-        }
-    });
+                acknowledgedCapabilities = this.capabilities.requires.slice();
 
-    // Once connected, do the following:
-    // 1. Send WEBIRC if proxy set.
-    // 2. Send PASS if set.
-    // 3. Do capabilities negotiations if set.
-    // 4. Send USER
-    // 5. Send NICK until one is accepted.
-    // 6. Resolve startupPromise.
-    // TODO(Havvy): Refactor and clean up!!!
-    socket.impl.once("connect", function doStartup () {
-        // If `socket.end()` is called before the connect event
-        // fires, then we ignore the connect event, since we are
-        // already ending/ended.
-        if (!socket.startupPromise.isPending()) {
-            return;
-        }
-
-        socket.status = "starting";
-        socket.emit("connect");
-        timeout = setTimeout(onSilence, timeoutPeriod);
-
-        if (socket.capabilities) {
-            socket.capabilities.requires = socket.capabilities.requires || [];
-            socket.capabilities.wants = socket.capabilities.wants || [];
-
-            var serverCapabilties;
-            var acknowledgedCapabilities = socket.capabilities.requires.slice();
-
-            var sentRequests = 0;
-            var respondedRequests = 0;
-            var allRequestsSent = false;
-        }
-
-        var nickname;
-
-        var sendUser = function () {
-            socket.raw(format("USER %s 8 * :%s", socket.username, socket.realname));
-        };
-
-        var sendNick = function  () {
-            if (socket.nicknames.length === 0) {
-                socket.raw("QUIT");
-                socket.resolvePromise(Fail(failures.nicknamesUnavailable));
-                return;
+                sentRequests = 0;
+                respondedRequests = 0;
+                allRequestsSent = false;
             }
 
-            nickname = socket.nicknames[0];
-            socket.nicknames.shift();
+            const sendUser = () => {
+                this.raw(format("USER %s 8 * :%s", this.username, this.realname));
+            };
 
-            socket.raw(["NICK", nickname]);
-        };
+            const sendNick = () => {
+                if (this.nicknames.length === 0) {
+                    this.raw("QUIT");
+                    this.resolvePromise(Fail(failures.nicknamesUnavailable));
+                    return;
+                }
 
-        var startupHandler = function startupHandler (line) {
-            var parts = line.split(" ");
+                nickname = this.nicknames[0];
+                this.nicknames.shift();
 
-            // If WEBIRC fails.
-            if (parts[0] === "ERROR") {
-                socket.resolvePromise(Fail(failures.badProxyConfiguration));
-                return;
-            // Ignore PINGs.
-            } else if (parts[0] === "PING") {
-                return;
-            }
+                this.raw(["NICK", nickname]);
+            };
 
-            var numeric = parts[1];
+            const startupHandler = (line) => {
+                const parts = line.split(" ");
+                // console.log("[IRC DEBUG] LINE: ", line);
 
-            if (numeric === "CAP") {
-                var capabilities = socket.capabilities;
+                // If WEBIRC fails.
+                if (parts[0] === "ERROR") {
+                    this.resolvePromise(Fail(failures.badProxyConfiguration));
+                    return;
+                    // Ignore PINGs.
+                } else if (parts[0] === "PING") {
+                    return;
+                }
 
-                if (parts[3] === "LS") {
-                    serverCapabilties = parts.slice(4);
-                    // Remove the colon off the first capability.
-                    serverCapabilties[0] = serverCapabilties[0].slice(1);
+                const numeric = parts[1];
+                if (numeric === "CAP") {
+                    let capabilities = this.capabilities;
 
-                    if (capabilities.requires.length !== 0) {
-                        if (capabilities.requires.every(function (capability) {
-                            return includes(serverCapabilties, capability);
-                        }))
-                        {
-                            socket.raw(format("CAP REQ :%s", capabilities.requires.join(" ")));
-                            sentRequests += 1;
-                        } else {
-                            socket.raw("QUIT");
-                            socket.resolvePromise(Fail(failures.missingRequiredCapabilities));
+                    if (parts[3] === "LS") {
+                        serverCapabilities = parts.slice(4);
+                        // Remove the colon off the first capability.
+                        serverCapabilities[0] = serverCapabilities[0].slice(1);
+                        if (capabilities.requires.length !== 0) {
+                            if (capabilities.requires.every((capability) => {
+                                return includes(serverCapabilities, capability);
+                            })) {
+                                this.raw(format("CAP REQ :%s", capabilities.requires.join(" ")));
+                                sentRequests += 1;
+                            } else {
+                                this.raw("QUIT");
+                                this.resolvePromise(Fail(failures.missingRequiredCapabilities));
+                                return;
+                            }
+                        }
+
+                        capabilities.wants
+                          .filter((capability) => {
+                              return includes(serverCapabilities, capability);
+                          })
+                          .forEach((capability) => {
+                              this.raw(format("CAP REQ :%s", capability));
+                              sentRequests += 1;
+                          });
+
+                        return;
+                    } else if (parts[3] === "NAK") {
+                        respondedRequests += 1;
+                        const capability = parts[4].slice(1);
+
+                        if (includes(capabilities.requires, capability)) {
+                            this.raw("QUIT");
+                            this.resolvePromise(Fail(failures.missingRequiredCapabilities));
                             return;
+                        }
+                    } else if (parts[3] === "ACK") {
+                        respondedRequests += 1;
+
+                        const capability = parts[4].slice(1);
+
+                        if (includes(capabilities.wants, capability)) {
+                            acknowledgedCapabilities.push(capability);
+                        }
+                        if (acknowledgedCapabilities.includes('sasl')) {
+                            this.raw(['AUTHENTICATE', 'PLAIN']);
                         }
                     }
 
-                    capabilities.wants
-                    .filter(function (capability) {
-                        return includes(serverCapabilties, capability);
-                    })
-                    .forEach(function (capability) {
-                        socket.raw(format("CAP REQ :%s", capability));
-                        sentRequests += 1;
-                    });
+                    if (sentRequests === respondedRequests) {
+                        if (!this.saslPassword) {
+                            this.raw("CAP END");
+                        }
 
-                    return;
-                } else if (parts[3] === "NAK") {
-                    respondedRequests += 1;
-                    var capability = parts[4].slice(1);
+                        // 4. Send USER
+                        sendUser();
 
-                    if (includes(capabilities.requires, capability)) {
-                        socket.raw("QUIT");
-                        socket.resolvePromise(Fail(failures.missingRequiredCapabilities));
-                        return;
+                        // 5. Send NICK
+                        sendNick();
                     }
-                } else if (parts[3] === "ACK") {
-                    respondedRequests += 1;
-
-                    var capability = parts[4].slice(1);
-
-                    if (includes(capabilities.wants, capability)) {
-                        acknowledgedCapabilities.push(capability);
+                } else if (numeric === "NOTICE") {
+                    if (endsWith(line, "Login unsuccessful")) {
+                        // irc.twitch.tv only in their non-standardness.
+                        // Server doesn't kill the this. but it doesn't accept input afterwards either.
+                        this.resolvePromise(Fail(failures.badPassword));
                     }
-                }
 
-                if (sentRequests === respondedRequests) {
-                    socket.raw("CAP END");
+                } else if (parts[0] === "AUTHENTICATE") {
+                    if (parts[1] === '+') {
+                        const encPW = Buffer.from(this.saslUsername + '\0' + this.saslUsername + '\0' + this.saslPassword).toString('base64');
+                        this.raw(['AUTHENTICATE', encPW]);
+                    }
+                } else if (numeric === '903') {
+                    this.raw("CAP END");
+                } else if (numeric === "001") {
+                    this.status = "running";
 
-                    // 4. Send USER
-                    sendUser();
+                    const data = {
+                        capabilities: acknowledgedCapabilities,
+                        nickname: nickname
+                    };
 
-                    // 5. Send NICK
+                    this.emit("ready", data);
+                    this.resolvePromise(Ok(data));
+                } else if (includes(["410", "421"], numeric)) {
+                    // Sent by Twitch.tv when doing a CAP command.
+                    if (this.capabilities.requires) {
+                        this.raw("QUIT");
+                        this.resolvePromise(Fail(failures.missingRequiredCapabilities));
+                    } else {
+                        // 4. Send USER
+                        sendUser();
+
+                        // 5. Send NICK
+                        sendNick();
+                    }
+                } else if (numeric === "464") {
+                    // Only sent if a bad password is given.
+                    // Server will end the this.afterwards.
+                    this.resolvePromise(Fail(failures.badPassword));
+                } else if (includes(["431", "432", "433", "436", "437", "484"], numeric)) {
+                    // Reasons you cannot use a nickname. We ignore what it is,
+                    // and just try with the next nickname.
                     sendNick();
+                } else if (numeric === "PING") {
+                    // PINGs are handled elsewhere, and a known message type.
+                    /* no-op */
                 }
-            } else if (numeric === "NOTICE") {
-                if (endsWith(line, "Login unsuccessful")) {
-                    // irc.twitch.tv only in their non-standardness.
-                    // Server doesn't kill the socket, but it doesn't accept input afterwards either.
-                    socket.resolvePromise(Fail(failures.badPassword));
-                }
-            } else if (numeric === "001") {
-                socket.status = "running";
+            };
 
-                var data = {
-                    capabilities: acknowledgedCapabilities,
-                    nickname: nickname
-                };
+            // Subscribe & Unsubscribe
+            // TODO(Havvy): Return /this/ Promise,
+            this.on("data", startupHandler);
+            this.startupPromise.finally(() => {
+                this.removeListener("data", startupHandler);
+            });
 
-                socket.emit("ready", data);
-                socket.resolvePromise(Ok(data));
-            } else if (includes(["410", "421"], numeric)) {
-                // Sent by Twitch.tv when doing a CAP command.
-                if (socket.capabilities.requires) {
-                    socket.raw("QUIT");
-                    socket.resolvePromise(Fail(failures.missingRequiredCapabilities));
-                } else {
-                    // 4. Send USER
-                    sendUser();
+            // 1. Send WEBIRC
+            if (typeof this.proxy === "object") {
+                const proxy = this.proxy;
 
-                    // 5. Send NICK
-                    sendNick();
-                }
-            } else if (numeric === "464") {
-                // Only sent if a bad password is given.
-                // Server will end the socket afterwards.
-                socket.resolvePromise(Fail(failures.badPassword));
-            } else if (includes(["431", "432", "433", "436", "437", "484"], numeric)) {
-                // Reasons you cannot use a nickname. We ignore what it is,
-                // and just try with the next nickname.
-                sendNick();
-            } else if (numeric === "PING") {
-                // PINGs are handled elsewhere, and a known message type.
-                /* no-op */
+                this.raw(["WEBIRC", proxy.password, proxy.username, proxy.hostname, proxy.ip]);
             }
-        };
 
-        // Subscribe & Unsubscribe
-        // TODO(Havvy): Return /this/ Promise, 
-        socket.on("data", startupHandler);
-        socket.startupPromise.finally(function (res) {
-            socket.removeListener("data", startupHandler);
+            // 2. Send PASS
+            // Will force kill connection if wrong.
+            if (typeof this.password === "string") {
+                this.raw(["PASS", this.password]);
+            }
+
+            // 3. Send CAP LS
+            if (typeof this.capabilities === "object") {
+                this.raw("CAP LS");
+            } else {
+                // 4. Send USER
+                sendUser();
+
+                // 5. Send NICK.
+                sendNick();
+            }
         });
 
-        // 1. Send WEBIRC
-        if (typeof socket.proxy === "object") {
-            var proxy = socket.proxy;
+        this.connection.on("error", (error) => {
+            this.status = "closed";
+            this.emit("error", error);
+        });
 
-            socket.raw(["WEBIRC", proxy.password, proxy.username, proxy.hostname, proxy.ip]);
-        }
+        this.connection.on("close", () => {
+            if (this.status === "starting" || this.status === "connecting") {
+                this.resolvePromise(Fail(failures.killed));
+            }
+            this.status = "closed";
+            this.emit("close");
+        });
 
-        // 2. Send PASS
-        // Will force kill connection if wrong.
-        if (typeof socket.password === "string") {
-            socket.raw(["PASS", socket.password]);
-        }
+        this.connection.on("end", () => {
+            this.emit("end");
 
-        // 3. Send CAP LS
-        if (typeof socket.capabilities === "object") {
-            socket.raw("CAP LS");
-        } else {
-            // 4. Send USER
-            sendUser();
+            if (this.pending) {
+                this.resolvePromise(Fail(failures.socketEnded));
+            }
 
-            // 5. Send NICK.
-            sendNick();
-        }
-    });
+            // Clean up our timeout.
+            clearTimeout(timeout);
+        });
 
-    socket.impl.on("error", function (error) {
-        socket.status = "closed";
-        socket.emit("error", error);
-    });
+        this.connection.on("timeout", () => {
+            this.emit("timeout");
+        });
 
-    socket.impl.on("close", function () {
-        if (socket.status === "starting" || socket.status === "connecting") {
-            socket.resolvePromise(Fail(failures.killed));
-        }
-        socket.status = "closed";
-        socket.emit("close");
-    });
+        this.connection.setEncoding("utf-8");
+        this.connection.setNoDelay();
+    }
 
-    socket.impl.on("end", function () {
-        socket.emit("end");
-
-        if (socket.startupPromise.isPending()) {
-            socket.resolvePromise(Fail(failures.socketEnded));
-        }
-
-        // Clean up our timeout.
-        clearTimeout(timeout);
-    });
-
-    socket.impl.on("timeout", function () {
-        socket.emit("timeout");
-    });
-
-    socket.impl.setEncoding("utf-8");
-    socket.impl.setNoDelay();
-
-    socket.on("timeout", function () {
-        socket.end();
-    });
-
-    return socket;
-};
-
-Socket.connectFailures = failures;
-
-Socket.prototype = Object.create(EventEmitter.prototype, intoPropertyDescriptors({
-    connect: function () {
+    connect() {
         if (this.isStarted()) {
-            throw new Error("Cannot restart an irc-socket Socket.");
+            throw new Error("Cannot restart an irc Socket.");
         }
 
         this.status = "connecting";
-        this.impl.connect(this.connectOptions);
-
+        this.connection = this.impl.connect(this.connectOptions);
+        this._setHandlers(this.connection);
         return this.startupPromise;
-    },
+    }
 
-    end: function () {
+    end() {
         if (!this.isConnected()) {
             return;
         }
 
-        if (this.startupPromise.isPending()) {
+        if (this.pending) {
             this.resolvePromise(Fail(failures.socketEnded));
         }
 
-        this.impl.end();
-    },
+        this.connection.end();
+    }
 
-    raw: function (message) {
+    raw(message) {
         if (!this.isConnected()) {
             return;
         }
@@ -410,27 +415,27 @@ Socket.prototype = Object.create(EventEmitter.prototype, intoPropertyDescriptors
         if (message.indexOf("\n") !== -1) {
             throw new Error("Newline detected in message. Use multiple raws instead.");
         }
+        // console.log('[IRC DEBUG] SEND: ' + message);
+        this.connection.write(message + "\r\n", "utf-8");
+    }
 
-        this.impl.write(message + "\r\n", "utf-8");
-    },
-    
-    setTimeout: function (timeout, callback) {
-        this.impl.setTimeout(timeout, callback);
-    },
+    setTimeout(timeout, callback) {
+        this.connection.setTimeout(timeout, callback);
+    }
 
-    isStarted: function () {
+    isStarted() {
         return this.status !== "initialized";
-    },
+    }
 
-    isConnected: function () {
+    isConnected() {
         return includes(["connecting", "starting", "running"], this.status);
-    },
+    }
 
-    isReady: function () {
+    isReady() {
         return this.status === "running";
-    },
+    }
 
-    getRealName: function () {
+    getRealName() {
         return this._realname;
     }
 
@@ -442,4 +447,6 @@ Socket.prototype = Object.create(EventEmitter.prototype, intoPropertyDescriptors
         EventEmitter.prototype.removeListener.apply(this, arguments);
     }
     */
-}));
+}
+
+module.exports = IrcSocket;

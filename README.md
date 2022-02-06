@@ -1,4 +1,4 @@
-IRC Socket - Socket wrapper to emit irc messages and handle server startup. 
+IRC Socket - Socket wrapper to emit irc messages and handle server startup.
 
 We provide for you the following benefits:
 
@@ -16,12 +16,11 @@ npm install irc-socket --save
 ## Instantiation ##
 
 ```javascript
-var NetSocket = require("net").Socket;
+var net = require("net");
 var IrcSocket = require("irc-socket");
 
-var netSocket = new Socket();
 var ircSocket = IrcSocket({
-    socket: netSocket,
+    socket: net,
 
     port: 6667,
     server: "irc.someircnetwork.net",
@@ -55,9 +54,9 @@ var ircSocket = IrcSocket({
         family: 6, // for ipv6 with net.Socket
     },
 
-    // optional number of milliseconds with no 
+    // optional number of milliseconds with no
     // response before timeout is fired
-    timeout: 5 * 60 * 1000 
+    timeout: 5 * 60 * 1000
 });
 ```
 
@@ -69,13 +68,12 @@ apart from the Socket, you don't need to modify the config object, especially
 since the rest of the configuration values can be serialized as JSON.
 
 ```javascript
-var NetSocket = require("net").Socket;
+var net = require("net");
 var IrcSocket = require("irc-socket");
 var fs = require("fs");
 
 var config = fs.readFileSync("config.json");
-var netSocket = new NetSocket();
-var ircSocket = IrcSocket(config, netSocket);
+var ircSocket = IrcSocket(config, net);
 ```
 
 ### Configuration
@@ -94,7 +92,11 @@ The configuration options are as follows.
 
  - `realname`: [**required**] "Real name" to send with the USER command.
 
- - `password`: Password used to connect to the network. Most networks don't have one.
+ - `password`: Password used to connect to the network. Most networks don't have one. 
+
+ - `saslPassword`: Will be used for SASL authentication if the sasl property is also true.
+
+ - `saslUsername`: Will be used for SASL authentication. (Defaults to username if not set).
 
  - `proxy`: WEBIRC details if your connection is acting as a (probably web-based) proxy.
 
@@ -106,7 +108,7 @@ The configuration options are as follows.
 
 Capabilities are a feature added in IRCv3 to extend IRC while still keeping
 IRCv2 compatibility. You can see the specification and well-known capabilities
-at [their website](http://ircv3.atheme.org/).
+at [the IRCv3 website](http://ircv3.net/).
 
 Should you want to use IRCv3 features, pass an object with the `requires`
 property listing which features you absolutely require and `wants` for
@@ -156,7 +158,7 @@ client.connect().then(function (res) {
 
 ## Writing to the Server ##
 To send messages to the server, use socket.raw(). It accepts either a
-string or an array of Strings. The message '''must''' follow the 
+string or an array of Strings. The message '''must''' follow the
 [IRC protocol](https://irc-wiki.org/RFC 1459).
 
 ```javascript
@@ -170,7 +172,7 @@ mySocket.connect().then(function (res) {
 
     // Using a string.
     mySocket.raw("JOIN #biscuits");
-}
+});
 
 mySocket.on('data', function (message) {
     message = message.split(" ");
@@ -217,7 +219,7 @@ you wish to log them.
 
 ## Timeouts ##
 
-The IRC socket will listen to ping messages and respond to them 
+The IRC socket will listen to ping messages and respond to them
 appropriately, so you do not need to handle this yourself.
 
 Furthermore, if no message from the server is sent within five
@@ -311,17 +313,16 @@ This means that you need to instantiate the socket you want. Once you upgrade th
 socket, you give up ownership of it, but gain ownership of the upgraded socket.
 
 ```
-var NetSocket = require("net").Socket;
+var net = require("net");
 var IrcSocket = require("irc-socket");
 
-var netSocket = new Socket();
 var ircSocket = IrcSocket({
     port: 6667,
     server: "irc.someircnetwork.net",
     nicknames: ["freddy", "freddy_"],
     username: "freddy",
     realname: "Freddy"
-});
+}, net);
 ```
 
 Even though `port` and `server` are part of the Socket connect options, you
@@ -330,12 +331,11 @@ option that was supported, you should instead pass the option in the
 connectOptions object.
 
 ```
-var NetSocket = require("net").Socket;
+var net = require("net");
 var IrcSocket = require("irc-socket");
 
-var netSocket = new Socket();
 var ircSocket = IrcSocket({
-    socket: netSocket,
+    socket: net,
     port: 6667,
     server: "irc.someircnetwork.net",
     nicknames: ["freddy", "freddy_"],
@@ -348,19 +348,17 @@ var ircSocket = IrcSocket({
 });
 ```
 
-For what was a `secure` socket, you must instead wrap a NetSocket around a
-TLS socket.
+For what was a `secure` socket, you must instead pass in the
+TLS socket object.
 
 ```
-var NetSocket = require("net").Socket;
-var TlsSocket = require("tls").TLSSocket;
+var tls = require("tls");
 var IrcSocket = require("irc-socket");
 
-var netSocket = new Socket();
-var tlsSocket = new TlsSocket(netSocket, {rejectUnauthorized: false});
 var IrcSocket = IrcSocket({
-    socket: tlsSocket,
+    socket: tls,
     ...
+    connectionOptions:  {rejectUnauthorized: false}
 });
 ```
 
