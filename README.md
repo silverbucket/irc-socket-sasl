@@ -1,4 +1,10 @@
+<<<<<<< HEAD
 IRC Socket - Socket wrapper to emit irc messages and handle server startup.
+=======
+# IRC Socket SASL
+
+Socket wrapper to emit IRC messages and handle server startup. Supports SSL and SASL authentication.
+>>>>>>> d2dca0d (merge)
 
 We provide for you the following benefits:
 
@@ -6,6 +12,13 @@ We provide for you the following benefits:
 * Pings are automatically ponged too..
 * The startup handshake (before the RPL_WELCOME) message is handled.
 * A `raw` method to send raw messages to the server.
+* NetSocket with SSL support
+* SASL authentication support
+
+## Maintainer ##
+
+Originally written and maintained by [Havvy](https://github.com/Havvy/irc-socket).
+Forked and now maintained by [Nick Jennings](https://github.com/silverbucket/irc-socket-sasl) to add SSL and SASL support.
 
 ## Installation ##
 
@@ -16,12 +29,11 @@ npm install irc-socket --save
 ## Instantiation ##
 
 ```javascript
-var net = require("net");
-var IrcSocket = require("irc-socket");
+const net = require("net");
+const IrcSocket = require("irc-socket");
 
-var ircSocket = IrcSocket({
+const ircSocket = IrcSocket({
     socket: net,
-
     port: 6667,
     server: "irc.someircnetwork.net",
     nicknames: ["freddy", "freddy_"],
@@ -68,12 +80,12 @@ apart from the Socket, you don't need to modify the config object, especially
 since the rest of the configuration values can be serialized as JSON.
 
 ```javascript
-var net = require("net");
-var IrcSocket = require("irc-socket");
-var fs = require("fs");
+const net = require("net");
+const IrcSocket = require("irc-socket");
+const fs = require("fs");
 
-var config = fs.readFileSync("config.json");
-var ircSocket = IrcSocket(config, net);
+const config = fs.readFileSync("config.json");
+const ircSocket = IrcSocket(config, net);
 ```
 
 ### Configuration
@@ -138,15 +150,15 @@ The `connect` method returns a
 You can either use the "ready" event or use the promises returned by the connect method.
 
 ```javascript
-var client = IrcSocket(...);
+const client = IrcSocket(options);
 client.once('ready', function () {
     client.end();
-}
+});
 client.connect();
 ```
 
 ```javascript
-var client = IrcSocket(...);
+const client = IrcSocket(options);
 client.connect().then(function (res) {
     // If connect failed, it already closed itself (or was force killed).
     // Otherwise, it succeeded, and we want to end it ourself.
@@ -156,14 +168,27 @@ client.connect().then(function (res) {
 });
 ```
 
+## SASL ##
+Supporting SASL authentication.
+
+```javascript
+const client = IrcSocket({
+  capabilities: {
+    requires: ["sasl"]
+  },
+  saslUsername: 'exampleuser',  // will default to `username` if not specified
+  saslPassword: 'foo bar'
+});
+```
+
 ## Writing to the Server ##
 To send messages to the server, use socket.raw(). It accepts either a
 string or an array of Strings. The message '''must''' follow the
 [IRC protocol](https://irc-wiki.org/RFC 1459).
 
 ```javascript
-var details = {...};
-var client = Ircsocket(details);
+const details = {...};
+const client = Ircsocket(details);
 
 mySocket.connect().then(function (res) {
     if (res.isFail()) {
@@ -313,10 +338,21 @@ This means that you need to instantiate the socket you want. Once you upgrade th
 socket, you give up ownership of it, but gain ownership of the upgraded socket.
 
 ```
+<<<<<<< HEAD
 var net = require("net");
+=======
+<<<<<<< Updated upstream
+var NetSocket = require("net").Socket;
+>>>>>>> d2dca0d (merge)
 var IrcSocket = require("irc-socket");
 
 var ircSocket = IrcSocket({
+=======
+const net = require("net");
+const IrcSocket = require("irc-socket");
+
+const ircSocket = IrcSocket({
+>>>>>>> Stashed changes
     port: 6667,
     server: "irc.someircnetwork.net",
     nicknames: ["freddy", "freddy_"],
@@ -331,11 +367,27 @@ option that was supported, you should instead pass the option in the
 connectOptions object.
 
 ```
+<<<<<<< HEAD
 var net = require("net");
+=======
+<<<<<<< Updated upstream
+var NetSocket = require("net").Socket;
+>>>>>>> d2dca0d (merge)
 var IrcSocket = require("irc-socket");
 
 var ircSocket = IrcSocket({
+<<<<<<< HEAD
     socket: net,
+=======
+    socket: netSocket,
+=======
+const net = require("net");
+const IrcSocket = require("irc-socket");
+
+const ircSocket = IrcSocket({
+    socket: net,
+>>>>>>> Stashed changes
+>>>>>>> d2dca0d (merge)
     port: 6667,
     server: "irc.someircnetwork.net",
     nicknames: ["freddy", "freddy_"],
@@ -352,10 +404,17 @@ For what was a `secure` socket, you must instead pass in the
 TLS socket object.
 
 ```
+<<<<<<< HEAD
 var tls = require("tls");
 var IrcSocket = require("irc-socket");
 
 var IrcSocket = IrcSocket({
+=======
+const tls = require("tls");
+const IrcSocket = require("irc-socket");
+
+const IrcSocket = IrcSocket({
+>>>>>>> d2dca0d (merge)
     socket: tls,
     ...
     connectionOptions:  {rejectUnauthorized: false}
