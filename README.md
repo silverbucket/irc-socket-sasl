@@ -1,10 +1,6 @@
-<<<<<<< HEAD
-IRC Socket - Socket wrapper to emit irc messages and handle server startup.
-=======
 # IRC Socket SASL
 
 Socket wrapper to emit IRC messages and handle server startup. Supports SSL and SASL authentication.
->>>>>>> d2dca0d (merge)
 
 We provide for you the following benefits:
 
