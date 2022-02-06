@@ -334,21 +334,10 @@ This means that you need to instantiate the socket you want. Once you upgrade th
 socket, you give up ownership of it, but gain ownership of the upgraded socket.
 
 ```
-<<<<<<< HEAD
-var net = require("net");
-=======
-<<<<<<< Updated upstream
-var NetSocket = require("net").Socket;
->>>>>>> d2dca0d (merge)
-var IrcSocket = require("irc-socket");
-
-var ircSocket = IrcSocket({
-=======
 const net = require("net");
 const IrcSocket = require("irc-socket");
 
 const ircSocket = IrcSocket({
->>>>>>> Stashed changes
     port: 6667,
     server: "irc.someircnetwork.net",
     nicknames: ["freddy", "freddy_"],
@@ -363,27 +352,11 @@ option that was supported, you should instead pass the option in the
 connectOptions object.
 
 ```
-<<<<<<< HEAD
-var net = require("net");
-=======
-<<<<<<< Updated upstream
-var NetSocket = require("net").Socket;
->>>>>>> d2dca0d (merge)
-var IrcSocket = require("irc-socket");
-
-var ircSocket = IrcSocket({
-<<<<<<< HEAD
-    socket: net,
-=======
-    socket: netSocket,
-=======
 const net = require("net");
 const IrcSocket = require("irc-socket");
 
 const ircSocket = IrcSocket({
     socket: net,
->>>>>>> Stashed changes
->>>>>>> d2dca0d (merge)
     port: 6667,
     server: "irc.someircnetwork.net",
     nicknames: ["freddy", "freddy_"],
@@ -400,17 +373,10 @@ For what was a `secure` socket, you must instead pass in the
 TLS socket object.
 
 ```
-<<<<<<< HEAD
-var tls = require("tls");
-var IrcSocket = require("irc-socket");
-
-var IrcSocket = IrcSocket({
-=======
 const tls = require("tls");
 const IrcSocket = require("irc-socket");
 
 const IrcSocket = IrcSocket({
->>>>>>> d2dca0d (merge)
     socket: tls,
     ...
     connectionOptions:  {rejectUnauthorized: false}
