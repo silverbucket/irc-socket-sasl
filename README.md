@@ -19,14 +19,14 @@ Forked and now maintained by [Nick Jennings](https://github.com/silverbucket/irc
 ## Installation ##
 
 ```
-npm install irc-socket --save
+npm install irc-socket-sasl --save
 ```
 
 ## Instantiation ##
 
 ```javascript
 const net = require("net");
-const IrcSocket = require("irc-socket");
+const IrcSocket = require("irc-socket-sasl");
 
 const ircSocket = IrcSocket({
     socket: net,
@@ -77,7 +77,7 @@ since the rest of the configuration values can be serialized as JSON.
 
 ```javascript
 const net = require("net");
-const IrcSocket = require("irc-socket");
+const IrcSocket = require("irc-socket-sasl");
 const fs = require("fs");
 
 const config = fs.readFileSync("config.json");
