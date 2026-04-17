@@ -293,14 +293,17 @@ class IrcSocket extends EventEmitter {
                         this.resolvePromise(Fail(failures.badPassword));
                     }
 
-                } else if (parts[0] === "AUTHENTICATE") {
+                } else if (parts[0] === "AUTHENTICATE" || numeric === "AUTHENTICATE") {
                     const chunkSize = 400;
+                    // Servers may prefix AUTHENTICATE (e.g. ":ergo.test AUTHENTICATE +").
+                    // When prefixed, the payload arg sits at parts[2]; otherwise parts[1].
+                    const authArg = numeric === "AUTHENTICATE" ? parts[2] : parts[1];
                     if (!saslResponseSent) {
                         // Initial server prompt. Send our credential in 400-byte
                         // AUTHENTICATE chunks; if the final chunk is exactly 400
                         // bytes (or the payload is empty), append a trailing
                         // AUTHENTICATE + per IRCv3 SASL 3.1.
-                        if (parts[1] !== '+') {
+                        if (authArg !== '+') {
                             return;
                         }
                         const payload = encodeSaslCredential(this.saslMechanism, this.saslUsername, this.saslPassword);
@@ -322,11 +325,11 @@ class IrcSocket extends EventEmitter {
                         // requires AUTHENTICATE AQ== to ack the error challenge
                         // before the server emits 904/905.
                         let challengeComplete = false;
-                        if (parts[1] === '+') {
+                        if (authArg === '+') {
                             challengeComplete = true;
                         } else {
-                            saslChallenge += parts[1];
-                            if (parts[1].length < chunkSize) {
+                            saslChallenge += authArg;
+                            if (authArg.length < chunkSize) {
                                 challengeComplete = true;
                             }
                         }

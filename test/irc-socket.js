@@ -62,6 +62,9 @@ const messages = {
     cap_sasl: ":irc.test.net CAP * LS :a b sasl\r\n",
     cap_sasl_only: ":irc.test.net CAP * LS :sasl\r\n",
     auth_plus: "AUTHENTICATE +\r\n",
+    // Server-prefixed variants (e.g. Ergo emits ":ergo.test AUTHENTICATE +").
+    auth_plus_prefixed: ":ergo.test AUTHENTICATE +\r\n",
+    auth_challenge_oauth_prefixed: ":ergo.test AUTHENTICATE eyJzdGF0dXMiOiJpbnZhbGlkX3Rva2VuIn0=\r\n",
     cap_ack_sasl: ":irc.test.net CAP * ACK :sasl\r\n",
     rpl_saslsuccess: ":irc.test.net 903 testbot :SASL authentication successful\r\n",
     rpl_saslfail_904: ":irc.test.net 904 testbot :SASL authentication failed\r\n",
@@ -512,6 +515,32 @@ describe("IRC Sockets", function () {
             return promise;
         });
 
+        it("SASL PLAIN completes when server prefixes AUTHENTICATE +", function () {
+            const config = merge(baseConfig, {
+                socket: MockSocket(logfn),
+                saslUsername: 'foo',
+                saslPassword: 'bar',
+                capabilities: { requires: ['sasl'] }
+            });
+            const socket = new IrcSocket(config);
+
+            const promise = socket.connect().then(function (res) {
+                assert(res.isOk());
+            });
+
+            socket.impl.acceptConnect();
+            socket.impl.acceptData(messages.cap_sasl_only);
+            socket.impl.acceptData(messages.cap_ack_sasl);
+            assert(socket.impl.write.getCall(2).calledWithExactly("AUTHENTICATE PLAIN\r\n", "utf-8"));
+            socket.impl.acceptData(messages.auth_plus_prefixed);
+            assert(socket.impl.write.getCall(5).calledWithExactly("AUTHENTICATE Zm9vAGZvbwBiYXI=\r\n", "utf-8"));
+            socket.impl.acceptData(messages.rpl_saslsuccess);
+            assert(socket.impl.write.getCall(6).calledWithExactly("CAP END\r\n", "utf-8"));
+            socket.impl.acceptData(messages.rpl_welcome);
+
+            return promise;
+        });
+
         it("SASL PLAIN defaults the mechanism when saslMechanism is omitted", function () {
             const config = merge(baseConfig, {
                 socket: MockSocket(logfn),
@@ -745,6 +774,33 @@ describe("IRC Sockets", function () {
             const writes = socket.impl.write.getCalls().map(function (c) { return c.args[0]; });
             assert(writes.indexOf("AUTHENTICATE AQ==\r\n") !== -1);
             // Then the failure numeric resolves the promise.
+            socket.impl.acceptData(messages.rpl_saslfail_904);
+
+            return promise;
+        });
+
+        it("SASL OAUTHBEARER acks prefixed failure challenge with AQ==", function () {
+            const config = merge(baseConfig, {
+                socket: MockSocket(logfn),
+                saslUsername: 'foo',
+                saslPassword: 'bad-token',
+                saslMechanism: 'OAUTHBEARER',
+                capabilities: { requires: ['sasl'] }
+            });
+            const socket = new IrcSocket(config);
+
+            const promise = socket.connect().then(function (res) {
+                assert(res.isFail());
+                assert(res.fail() === IrcSocket.connectFailures.saslAuthenticationFailed);
+            });
+
+            socket.impl.acceptConnect();
+            socket.impl.acceptData(messages.cap_sasl_only);
+            socket.impl.acceptData(messages.cap_ack_sasl);
+            socket.impl.acceptData(messages.auth_plus_prefixed);
+            socket.impl.acceptData(messages.auth_challenge_oauth_prefixed);
+            const writes = socket.impl.write.getCalls().map(function (c) { return c.args[0]; });
+            assert(writes.indexOf("AUTHENTICATE AQ==\r\n") !== -1);
             socket.impl.acceptData(messages.rpl_saslfail_904);
 
             return promise;
