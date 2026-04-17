@@ -1,6 +1,6 @@
 {
   "name": "irc-socket-sasl",
-  "version": "4.1.0",
+  "version": "4.1.1",
   "description": "Simple IRC Socket with SSL and SASL support, for usage with IRC libraries. Forked from irc-socket.",
   "main": "irc-socket.js",
   "private": false,
@@ -12,12 +12,12 @@
     "irc",
     "socket"
   ],
-  "author": "Nick Jennings <nick@silverbucket.net> (https://silverbucket.net)",
+  "author": "Ryan S. Scheel (havvy)",
   "contributors": [
     "Ryan S. Scheel (havvy)",
     "Ricki Hastings <ricki@ircanywhere.com> (http://ircanywhere.com)",
     "Fionn Kelleher <me@fionn.co> (http://fionn.co)",
-    "Ryan S. Scheel (havvy)"
+    "Nick Jennings <nick@silverbucket.net> (https://silverbucket.net)"
   ],
   "license": "ISC",
   "devDependencies": {
