@@ -208,7 +208,11 @@ The bearer token (or password) is sent over the wire. Connect over TLS — typic
 
 ### Failure handling
 
-If the server rejects authentication (numerics `902`, `904`, `905`, `906`, or `907`), the connect promise resolves with `Fail(IrcSocket.connectFailures.saslAuthenticationFailed)` and the socket is closed with `QUIT`. Successful numerics `900` (logged in) and `903` (SASL success) advance the handshake.
+If the server rejects authentication (numerics `902`, `904`, `905`, `906`, or `907`), the connect promise resolves with `Fail(IrcSocket.connectFailures.saslAuthenticationFailed)` and the socket is closed with `QUIT`. The handshake finalizes on `903` (RPL_SASLSUCCESS); `900` (RPL_LOGGEDIN) is informational. For OAUTHBEARER, when the server responds with an RFC 7628 error challenge instead of the `+` prompt, the client acknowledges with `AUTHENTICATE AQ==` so the server can emit the failure numeric.
+
+### Large payloads
+
+`AUTHENTICATE` payloads are automatically split into 400-byte chunks per IRCv3 SASL 3.1. You don't need to size credentials manually — long OAuth access tokens are handled transparently.
 
 ### Unsupported mechanism
 

@@ -289,11 +289,32 @@ class IrcSocket extends EventEmitter {
 
                 } else if (parts[0] === "AUTHENTICATE") {
                     if (parts[1] === '+') {
+                        // Server prompt: send our credential in 400-byte AUTHENTICATE
+                        // chunks. If the final chunk is exactly 400 bytes (or the
+                        // payload is empty), send a trailing AUTHENTICATE + per
+                        // IRCv3 SASL 3.1.
                         const payload = encodeSaslCredential(this.saslMechanism, this.saslUsername, this.saslPassword);
-                        this.raw(['AUTHENTICATE', payload]);
+                        const chunkSize = 400;
+                        if (payload.length === 0) {
+                            this.raw(['AUTHENTICATE', '+']);
+                        } else {
+                            for (let i = 0; i < payload.length; i += chunkSize) {
+                                this.raw(['AUTHENTICATE', payload.slice(i, i + chunkSize)]);
+                            }
+                            if (payload.length % chunkSize === 0) {
+                                this.raw(['AUTHENTICATE', '+']);
+                            }
+                        }
+                    } else if (this.saslMechanism === 'OAUTHBEARER') {
+                        // RFC 7628 §3.2.3: on failure the server sends a base64
+                        // error challenge; the client must reply with
+                        // AUTHENTICATE AQ== (base64 of \x01) so the server can
+                        // emit the failure numeric.
+                        this.raw(['AUTHENTICATE', 'AQ==']);
                     }
-                } else if (numeric === '900' || numeric === '903') {
-                    // 900 RPL_LOGGEDIN, 903 RPL_SASLSUCCESS
+                } else if (numeric === '903') {
+                    // RPL_SASLSUCCESS — advance past CAP. 900 RPL_LOGGEDIN is
+                    // informational and may arrive before 903; ignore it.
                     this.raw("CAP END");
                 } else if (numeric === '902' || numeric === '904' || numeric === '905' || numeric === '906' || numeric === '907') {
                     // SASL aborted/failed/too-long/already/mech-unavailable
