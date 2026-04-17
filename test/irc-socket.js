@@ -69,6 +69,11 @@ const messages = {
     rpl_loggedin_900: ":irc.test.net 900 testbot nick!user@host testbot :You are now logged in as testbot\r\n",
     // Simulated RFC 7628 failure challenge (base64 of '{"status":"invalid_token"}')
     auth_challenge_oauth: "AUTHENTICATE eyJzdGF0dXMiOiJpbnZhbGlkX3Rva2VuIn0=\r\n",
+    // Multi-chunk challenge: a 400-byte chunk (must continue), then a short chunk (end).
+    auth_challenge_chunk_400: "AUTHENTICATE " + "A".repeat(400) + "\r\n",
+    auth_challenge_chunk_tail: "AUTHENTICATE " + "B".repeat(20) + "\r\n",
+    // 400-byte-multiple challenge: 400-byte chunk then trailing "+".
+    auth_challenge_terminator: "AUTHENTICATE +\r\n",
     cap_ack_a: ":irc.test.net CAP * ACK :a\r\n",
     cap_nak_a: ":irc.test.net CAP * NAK :a\r\n",
     cap_nak_b: ":irc.test.net CAP * NAK :b\r\n",
@@ -740,6 +745,78 @@ describe("IRC Sockets", function () {
             const writes = socket.impl.write.getCalls().map(function (c) { return c.args[0]; });
             assert(writes.indexOf("AUTHENTICATE AQ==\r\n") !== -1);
             // Then the failure numeric resolves the promise.
+            socket.impl.acceptData(messages.rpl_saslfail_904);
+
+            return promise;
+        });
+
+        it("SASL OAUTHBEARER waits for multi-chunk challenge before acking", function () {
+            const config = merge(baseConfig, {
+                socket: MockSocket(logfn),
+                saslUsername: 'foo',
+                saslPassword: 'bad-token',
+                saslMechanism: 'OAUTHBEARER',
+                capabilities: { requires: ['sasl'] }
+            });
+            const socket = new IrcSocket(config);
+
+            const promise = socket.connect().then(function (res) {
+                assert(res.isFail());
+                assert(res.fail() === IrcSocket.connectFailures.saslAuthenticationFailed);
+            });
+
+            socket.impl.acceptConnect();
+            socket.impl.acceptData(messages.cap_sasl_only);
+            socket.impl.acceptData(messages.cap_ack_sasl);
+            socket.impl.acceptData(messages.auth_plus);
+
+            // First 400-byte challenge chunk — client must NOT ack yet.
+            const callsBeforeTail = socket.impl.write.callCount;
+            socket.impl.acceptData(messages.auth_challenge_chunk_400);
+            const writesMid = socket.impl.write.getCalls().map(function (c) { return c.args[0]; });
+            assert(writesMid.indexOf("AUTHENTICATE AQ==\r\n") === -1);
+            assert(socket.impl.write.callCount === callsBeforeTail);
+
+            // Short terminating chunk — now the client acks.
+            socket.impl.acceptData(messages.auth_challenge_chunk_tail);
+            const writesAfter = socket.impl.write.getCalls().map(function (c) { return c.args[0]; });
+            assert(writesAfter.indexOf("AUTHENTICATE AQ==\r\n") !== -1);
+
+            socket.impl.acceptData(messages.rpl_saslfail_904);
+
+            return promise;
+        });
+
+        it("SASL OAUTHBEARER acks when 400-byte chunks end with trailing +", function () {
+            const config = merge(baseConfig, {
+                socket: MockSocket(logfn),
+                saslUsername: 'foo',
+                saslPassword: 'bad-token',
+                saslMechanism: 'OAUTHBEARER',
+                capabilities: { requires: ['sasl'] }
+            });
+            const socket = new IrcSocket(config);
+
+            const promise = socket.connect().then(function (res) {
+                assert(res.isFail());
+                assert(res.fail() === IrcSocket.connectFailures.saslAuthenticationFailed);
+            });
+
+            socket.impl.acceptConnect();
+            socket.impl.acceptData(messages.cap_sasl_only);
+            socket.impl.acceptData(messages.cap_ack_sasl);
+            socket.impl.acceptData(messages.auth_plus);
+
+            // Exactly-400-byte chunk — not terminal on its own.
+            const callsBeforeTerm = socket.impl.write.callCount;
+            socket.impl.acceptData(messages.auth_challenge_chunk_400);
+            assert(socket.impl.write.callCount === callsBeforeTerm);
+
+            // Trailing "+" terminates the 400-byte-multiple challenge; ack now.
+            socket.impl.acceptData(messages.auth_challenge_terminator);
+            const writesAfter = socket.impl.write.getCalls().map(function (c) { return c.args[0]; });
+            assert(writesAfter.indexOf("AUTHENTICATE AQ==\r\n") !== -1);
+
             socket.impl.acceptData(messages.rpl_saslfail_904);
 
             return promise;

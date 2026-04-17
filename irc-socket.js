@@ -168,6 +168,12 @@ class IrcSocket extends EventEmitter {
             this.emit("connect");
             timeout = setTimeout(onSilence, timeoutPeriod);
             let serverCapabilities, acknowledgedCapabilities, sentRequests, respondedRequests, allRequestsSent, nickname;
+            // SASL challenge state: saslResponseSent flips once we've replied to
+            // the initial AUTHENTICATE + prompt; saslChallenge accumulates
+            // server-sent challenge chunks per IRCv3 SASL 3.1 (400-byte chunks,
+            // terminated by a short chunk or a trailing AUTHENTICATE +).
+            let saslResponseSent = false;
+            let saslChallenge = '';
 
             if (this.capabilities) {
                 this.capabilities.requires = this.capabilities.requires || [];
@@ -288,13 +294,16 @@ class IrcSocket extends EventEmitter {
                     }
 
                 } else if (parts[0] === "AUTHENTICATE") {
-                    if (parts[1] === '+') {
-                        // Server prompt: send our credential in 400-byte AUTHENTICATE
-                        // chunks. If the final chunk is exactly 400 bytes (or the
-                        // payload is empty), send a trailing AUTHENTICATE + per
-                        // IRCv3 SASL 3.1.
+                    const chunkSize = 400;
+                    if (!saslResponseSent) {
+                        // Initial server prompt. Send our credential in 400-byte
+                        // AUTHENTICATE chunks; if the final chunk is exactly 400
+                        // bytes (or the payload is empty), append a trailing
+                        // AUTHENTICATE + per IRCv3 SASL 3.1.
+                        if (parts[1] !== '+') {
+                            return;
+                        }
                         const payload = encodeSaslCredential(this.saslMechanism, this.saslUsername, this.saslPassword);
-                        const chunkSize = 400;
                         if (payload.length === 0) {
                             this.raw(['AUTHENTICATE', '+']);
                         } else {
@@ -305,12 +314,28 @@ class IrcSocket extends EventEmitter {
                                 this.raw(['AUTHENTICATE', '+']);
                             }
                         }
-                    } else if (this.saslMechanism === 'OAUTHBEARER') {
-                        // RFC 7628 §3.2.3: on failure the server sends a base64
-                        // error challenge; the client must reply with
-                        // AUTHENTICATE AQ== (base64 of \x01) so the server can
-                        // emit the failure numeric.
-                        this.raw(['AUTHENTICATE', 'AQ==']);
+                        saslResponseSent = true;
+                    } else {
+                        // Post-response server challenge. Accumulate chunks until
+                        // we see either a short chunk or a trailing "+" (after
+                        // 400-byte chunks). For OAUTHBEARER, RFC 7628 §3.2.3
+                        // requires AUTHENTICATE AQ== to ack the error challenge
+                        // before the server emits 904/905.
+                        let challengeComplete = false;
+                        if (parts[1] === '+') {
+                            challengeComplete = true;
+                        } else {
+                            saslChallenge += parts[1];
+                            if (parts[1].length < chunkSize) {
+                                challengeComplete = true;
+                            }
+                        }
+                        if (challengeComplete) {
+                            saslChallenge = '';
+                            if (this.saslMechanism === 'OAUTHBEARER') {
+                                this.raw(['AUTHENTICATE', 'AQ==']);
+                            }
+                        }
                     }
                 } else if (numeric === '903') {
                     // RPL_SASLSUCCESS — advance past CAP. 900 RPL_LOGGEDIN is
