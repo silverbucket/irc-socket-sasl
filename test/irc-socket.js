@@ -1,6 +1,6 @@
 const sinon = require("sinon");
 const assert = require("better-assert");
-const equal = require("deep-eql");
+const { deepStrictEqual } = require("node:assert");
 const uinspect = require("util").inspect;
 const format = require("util").format;
 
@@ -437,7 +437,7 @@ describe("IRC Sockets", function () {
             const promise = socket.connect()
             .then(function (res) {
                 assert(res.isOk());
-                assert(equal(res.ok().capabilities, ["a"]));
+                deepStrictEqual(res.ok().capabilities, ["a"]);
             });
 
             socket.impl.acceptConnect();
@@ -467,7 +467,7 @@ describe("IRC Sockets", function () {
             const promise = socket.connect()
               .then(function (res) {
                   assert(res.isOk());
-                  assert(equal(res.ok().capabilities, ["a", "sasl"]));
+                  deepStrictEqual(res.ok().capabilities, ["a", "sasl"]);
               });
 
             socket.impl.acceptConnect();
@@ -881,7 +881,7 @@ describe("IRC Sockets", function () {
             const promise = socket.connect()
             .then(function (res) {
                 assert(res.isOk());
-                assert(equal(res.ok().capabilities, ["a"]));
+                deepStrictEqual(res.ok().capabilities, ["a"]);
             });
 
             socket.impl.acceptConnect();
@@ -909,7 +909,7 @@ describe("IRC Sockets", function () {
             const promise = socket.connect()
             .then(function (res) {
                 assert(res.isOk());
-                assert(equal(res.ok().capabilities, []));
+                deepStrictEqual(res.ok().capabilities, []);
             });
 
             socket.impl.acceptConnect();
@@ -937,7 +937,7 @@ describe("IRC Sockets", function () {
             const promise = socket.connect()
             .then(function (res) {
                 assert(res.isOk());
-                assert(equal(res.ok().capabilities, ["a"]));
+                deepStrictEqual(res.ok().capabilities, ["a"]);
             });
 
             socket.impl.acceptConnect();
@@ -989,10 +989,10 @@ describe("IRC Sockets", function () {
             socket.connect();
             socket.impl.acceptConnect();
 
-            assert(equal(socket.impl.connect.getCall(0).args, [{
+            deepStrictEqual(socket.impl.connect.getCall(0).args, [{
                 port: 6667,
                 host: "irc.test.net"
-            }]));
+            }]);
         });
 
         it("Failure by .end() before connect event fired", function () {
