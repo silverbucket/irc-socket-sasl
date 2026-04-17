@@ -102,9 +102,11 @@ The configuration options are as follows.
 
  - `password`: Password used to connect to the network. Most networks don't have one. 
 
- - `saslPassword`: Will be used for SASL authentication if the sasl property is also true.
+ - `saslMechanism`: SASL mechanism to use. Either `"PLAIN"` (default) or `"OAUTHBEARER"`.
 
- - `saslUsername`: Will be used for SASL authentication. (Defaults to username if not set).
+ - `saslPassword`: The credential sent during SASL. For `PLAIN`, this is the account password. For `OAUTHBEARER`, this is the OAuth 2.0 access token.
+
+ - `saslUsername`: Account name sent during SASL authentication. Defaults to `username` if not set. Required for `PLAIN`; sent but not used on the wire for `OAUTHBEARER`.
 
  - `proxy`: WEBIRC details if your connection is acting as a (probably web-based) proxy.
 
@@ -165,17 +167,52 @@ client.connect().then(function (res) {
 ```
 
 ## SASL ##
-Supporting SASL authentication.
+
+SASL authentication negotiates a `sasl` capability during the IRCv3 handshake, then runs one of two mechanisms:
+
+- **`PLAIN`** (default) — sends username + password, base64-encoded per [RFC 4616](https://datatracker.ietf.org/doc/html/rfc4616).
+- **`OAUTHBEARER`** — sends an OAuth 2.0 access token, base64-encoded per [RFC 7628](https://datatracker.ietf.org/doc/html/rfc7628).
+
+Providing `saslPassword` triggers SASL. Always request the `sasl` capability so the server negotiates it:
+
+```javascript
+capabilities: { requires: ["sasl"] }
+```
+
+### PLAIN
 
 ```javascript
 const client = IrcSocket({
-  capabilities: {
-    requires: ["sasl"]
-  },
-  saslUsername: 'exampleuser',  // will default to `username` if not specified
-  saslPassword: 'foo bar'
+  capabilities: { requires: ["sasl"] },
+  saslUsername: 'exampleuser',  // defaults to `username` if omitted
+  saslPassword: 'correct horse battery staple'
 });
 ```
+
+### OAUTHBEARER
+
+Supported by networks such as SourceHut's `chat.sr.ht`. Use this when you have an OAuth 2.0 access token rather than a password:
+
+```javascript
+const client = IrcSocket({
+  capabilities: { requires: ["sasl"] },
+  saslMechanism: 'OAUTHBEARER',
+  saslUsername: 'exampleuser',
+  saslPassword: ACCESS_TOKEN  // your OAuth 2.0 access token
+});
+```
+
+### Security
+
+The bearer token (or password) is sent over the wire. Connect over TLS — typically port `6697` with a `tls.Socket` as the underlying socket — so credentials are not exposed in transit.
+
+### Failure handling
+
+If the server rejects authentication (numerics `902`, `904`, `905`, `906`, or `907`), the connect promise resolves with `Fail(IrcSocket.connectFailures.saslAuthenticationFailed)` and the socket is closed with `QUIT`. Successful numerics `900` (logged in) and `903` (SASL success) advance the handshake.
+
+### Unsupported mechanism
+
+Passing any `saslMechanism` other than `"PLAIN"` or `"OAUTHBEARER"` throws synchronously at construction.
 
 ## Writing to the Server ##
 To send messages to the server, use socket.raw(). It accepts either a

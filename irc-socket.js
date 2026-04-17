@@ -29,13 +29,23 @@ const endsWith = function (string, postfix) {
     return string.lastIndexOf(postfix) === string.length - postfix.length;
 };
 
+const encodeSaslCredential = function (mechanism, username, secret) {
+    if (mechanism === 'OAUTHBEARER') {
+        // RFC 7628: gs2-header "n,," then \x01 auth=Bearer <token> \x01 \x01
+        return Buffer.from('n,,\x01auth=Bearer ' + secret + '\x01\x01').toString('base64');
+    }
+    // PLAIN (RFC 4616): [authzid]\0[authcid]\0[passwd]
+    return Buffer.from(username + '\0' + username + '\0' + secret).toString('base64');
+};
+
 const failures = {
     killed: 'killed',
     nicknamesUnavailable: 'nicknames unavailable',
     badProxyConfiguration: 'bad proxy configuration',
     missingRequiredCapabilities: 'missing required capabilities',
     badPassword: 'bad password',
-    socketEnded: 'socket ended'
+    socketEnded: 'socket ended',
+    saslAuthenticationFailed: 'sasl authentication failed'
 };
 
 class IrcSocket extends EventEmitter {
@@ -64,6 +74,10 @@ class IrcSocket extends EventEmitter {
         if (config.saslPassword) {
             this.saslUsername = config.saslUsername || config.username;
             this.saslPassword = config.saslPassword;
+            this.saslMechanism = (config.saslMechanism || 'PLAIN').toUpperCase();
+            if (this.saslMechanism !== 'PLAIN' && this.saslMechanism !== 'OAUTHBEARER') {
+                throw new Error('Unsupported SASL mechanism: ' + config.saslMechanism);
+            }
         }
         this.username = config.username;
         this.realname = config.realname;
@@ -251,7 +265,7 @@ class IrcSocket extends EventEmitter {
                             acknowledgedCapabilities.push(capability);
                         }
                         if (acknowledgedCapabilities.includes('sasl')) {
-                            this.raw(['AUTHENTICATE', 'PLAIN']);
+                            this.raw(['AUTHENTICATE', this.saslMechanism || 'PLAIN']);
                         }
                     }
 
@@ -275,11 +289,17 @@ class IrcSocket extends EventEmitter {
 
                 } else if (parts[0] === "AUTHENTICATE") {
                     if (parts[1] === '+') {
-                        const encPW = Buffer.from(this.saslUsername + '\0' + this.saslUsername + '\0' + this.saslPassword).toString('base64');
-                        this.raw(['AUTHENTICATE', encPW]);
+                        const payload = encodeSaslCredential(this.saslMechanism, this.saslUsername, this.saslPassword);
+                        this.raw(['AUTHENTICATE', payload]);
                     }
-                } else if (numeric === '903') {
+                } else if (numeric === '900' || numeric === '903') {
+                    // 900 RPL_LOGGEDIN, 903 RPL_SASLSUCCESS
                     this.raw("CAP END");
+                } else if (numeric === '902' || numeric === '904' || numeric === '905' || numeric === '906' || numeric === '907') {
+                    // SASL aborted/failed/too-long/already/mech-unavailable
+                    this.raw("QUIT");
+                    this.resolvePromise(Fail(failures.saslAuthenticationFailed));
+                    return;
                 } else if (numeric === "001") {
                     this.status = "running";
 
