@@ -23,7 +23,6 @@
   "devDependencies": {
     "@silverbucket/mock-net-socket": "^2.0.0",
     "better-assert": "^1.0.2",
-    "deep-eql": "^4.1.4",
     "mocha": "^11.0.0",
     "sinon": "^21.0.0"
   },
