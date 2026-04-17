@@ -29,13 +29,23 @@ const endsWith = function (string, postfix) {
     return string.lastIndexOf(postfix) === string.length - postfix.length;
 };
 
+const encodeSaslCredential = function (mechanism, username, secret) {
+    if (mechanism === 'OAUTHBEARER') {
+        // RFC 7628: gs2-header "n,," then \x01 auth=Bearer <token> \x01 \x01
+        return Buffer.from('n,,\x01auth=Bearer ' + secret + '\x01\x01').toString('base64');
+    }
+    // PLAIN (RFC 4616): [authzid]\0[authcid]\0[passwd]
+    return Buffer.from(username + '\0' + username + '\0' + secret).toString('base64');
+};
+
 const failures = {
     killed: 'killed',
     nicknamesUnavailable: 'nicknames unavailable',
     badProxyConfiguration: 'bad proxy configuration',
     missingRequiredCapabilities: 'missing required capabilities',
     badPassword: 'bad password',
-    socketEnded: 'socket ended'
+    socketEnded: 'socket ended',
+    saslAuthenticationFailed: 'sasl authentication failed'
 };
 
 class IrcSocket extends EventEmitter {
@@ -64,6 +74,10 @@ class IrcSocket extends EventEmitter {
         if (config.saslPassword) {
             this.saslUsername = config.saslUsername || config.username;
             this.saslPassword = config.saslPassword;
+            this.saslMechanism = (config.saslMechanism || 'PLAIN').toUpperCase();
+            if (this.saslMechanism !== 'PLAIN' && this.saslMechanism !== 'OAUTHBEARER') {
+                throw new Error('Unsupported SASL mechanism: ' + config.saslMechanism);
+            }
         }
         this.username = config.username;
         this.realname = config.realname;
@@ -154,6 +168,12 @@ class IrcSocket extends EventEmitter {
             this.emit("connect");
             timeout = setTimeout(onSilence, timeoutPeriod);
             let serverCapabilities, acknowledgedCapabilities, sentRequests, respondedRequests, allRequestsSent, nickname;
+            // SASL challenge state: saslResponseSent flips once we've replied to
+            // the initial AUTHENTICATE + prompt; saslChallenge accumulates
+            // server-sent challenge chunks per IRCv3 SASL 3.1 (400-byte chunks,
+            // terminated by a short chunk or a trailing AUTHENTICATE +).
+            let saslResponseSent = false;
+            let saslChallenge = '';
 
             if (this.capabilities) {
                 this.capabilities.requires = this.capabilities.requires || [];
@@ -251,7 +271,7 @@ class IrcSocket extends EventEmitter {
                             acknowledgedCapabilities.push(capability);
                         }
                         if (acknowledgedCapabilities.includes('sasl')) {
-                            this.raw(['AUTHENTICATE', 'PLAIN']);
+                            this.raw(['AUTHENTICATE', this.saslMechanism || 'PLAIN']);
                         }
                     }
 
@@ -274,12 +294,58 @@ class IrcSocket extends EventEmitter {
                     }
 
                 } else if (parts[0] === "AUTHENTICATE") {
-                    if (parts[1] === '+') {
-                        const encPW = Buffer.from(this.saslUsername + '\0' + this.saslUsername + '\0' + this.saslPassword).toString('base64');
-                        this.raw(['AUTHENTICATE', encPW]);
+                    const chunkSize = 400;
+                    if (!saslResponseSent) {
+                        // Initial server prompt. Send our credential in 400-byte
+                        // AUTHENTICATE chunks; if the final chunk is exactly 400
+                        // bytes (or the payload is empty), append a trailing
+                        // AUTHENTICATE + per IRCv3 SASL 3.1.
+                        if (parts[1] !== '+') {
+                            return;
+                        }
+                        const payload = encodeSaslCredential(this.saslMechanism, this.saslUsername, this.saslPassword);
+                        if (payload.length === 0) {
+                            this.raw(['AUTHENTICATE', '+']);
+                        } else {
+                            for (let i = 0; i < payload.length; i += chunkSize) {
+                                this.raw(['AUTHENTICATE', payload.slice(i, i + chunkSize)]);
+                            }
+                            if (payload.length % chunkSize === 0) {
+                                this.raw(['AUTHENTICATE', '+']);
+                            }
+                        }
+                        saslResponseSent = true;
+                    } else {
+                        // Post-response server challenge. Accumulate chunks until
+                        // we see either a short chunk or a trailing "+" (after
+                        // 400-byte chunks). For OAUTHBEARER, RFC 7628 §3.2.3
+                        // requires AUTHENTICATE AQ== to ack the error challenge
+                        // before the server emits 904/905.
+                        let challengeComplete = false;
+                        if (parts[1] === '+') {
+                            challengeComplete = true;
+                        } else {
+                            saslChallenge += parts[1];
+                            if (parts[1].length < chunkSize) {
+                                challengeComplete = true;
+                            }
+                        }
+                        if (challengeComplete) {
+                            saslChallenge = '';
+                            if (this.saslMechanism === 'OAUTHBEARER') {
+                                this.raw(['AUTHENTICATE', 'AQ==']);
+                            }
+                        }
                     }
                 } else if (numeric === '903') {
+                    // RPL_SASLSUCCESS — advance past CAP. 900 RPL_LOGGEDIN is
+                    // informational and may arrive before 903; ignore it.
                     this.raw("CAP END");
+                } else if (numeric === '902' || numeric === '904' || numeric === '905' || numeric === '906' || numeric === '907') {
+                    // SASL aborted/failed/too-long/already/mech-unavailable
+                    this.raw("QUIT");
+                    this.resolvePromise(Fail(failures.saslAuthenticationFailed));
+                    return;
                 } else if (numeric === "001") {
                     this.status = "running";
 
