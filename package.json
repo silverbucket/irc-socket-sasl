@@ -24,7 +24,7 @@
     "@silverbucket/mock-net-socket": "^2.0.0",
     "better-assert": "^1.0.2",
     "mocha": "^11.0.0",
-    "sinon": "^21.0.0"
+    "sinon": "^22.0.0"
   },
   "dependencies": {
     "r-result": "^1.5.1"
