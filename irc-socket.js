@@ -84,7 +84,7 @@ class IrcSocket extends EventEmitter {
         this.nicknames = config.nicknames.slice();
         this.timeout = config.timeout || 5 * 60 * 1000;
 
-        this.connectOptions = typeof config.connectOptions === "object" ? Object.create(config.connectOptions) : {};
+        this.connectOptions = typeof config.connectOptions === "object" && config.connectOptions !== null ? { ...config.connectOptions } : {};
         this.connectOptions.port = config.port || 6667;
         this.connectOptions.host = config.server;
 
