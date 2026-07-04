@@ -5,7 +5,7 @@
   "main": "irc-socket.js",
   "private": false,
   "scripts": {
-    "test": "mocha test/irc-socket.js"
+    "test": "mocha test/irc-socket.js test/result.js"
   },
   "repository": "https://github.com/silverbucket/irc-socket.git",
   "keywords": [
@@ -25,8 +25,5 @@
     "better-assert": "^1.0.2",
     "mocha": "^11.0.0",
     "sinon": "^21.0.0"
-  },
-  "dependencies": {
-    "r-result": "^1.5.1"
   }
 }

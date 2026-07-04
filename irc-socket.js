@@ -9,9 +9,7 @@
 
 const EventEmitter = require("events").EventEmitter;
 const format = require("util").format;
-const rresult = require("r-result");
-const Ok = rresult.Ok;
-const Fail = rresult.Fail;
+const { Ok, Fail } = require("./result.js");
 
 const includes = function (array, value) {
     return array.indexOf(value) !== -1;

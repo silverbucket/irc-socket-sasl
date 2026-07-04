@@ -433,9 +433,10 @@ and you should find all of them.
 ### connect() returns a Promise
 
 Instead of listening to the `ready` event and doing your own startup handling there,
-the `connect` method return a Promise. The promise resolves to a
-[r-result](https://npmjs.org/package/r-result) result (mostly equivalent to Rust's
-Result type) where it is either Ok({capabilities, nickname}) or Fail(ConnectFailureReason).
+the `connect` method return a Promise. The promise resolves to a small Result
+value (mostly equivalent to Rust's Result type) where it is either
+Ok({capabilities, nickname}) or Fail(ConnectFailureReason). Inspect it with
+`res.isOk()` / `res.isFail()` and unwrap it with `res.ok()` / `res.fail()`.
 The connect failure reasons are located at IrcSocket.connectFailures.
 
 ## See Also
