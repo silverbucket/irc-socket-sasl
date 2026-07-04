@@ -152,6 +152,53 @@ describe("IRC Sockets", function () {
         });
     });
 
+    describe("connectOptions", function () {
+        // Regression test for silverbucket/irc-socket-sasl#24.
+        // Caller-supplied connectOptions (e.g. TLS options such as
+        // rejectUnauthorized, ca, key, cert) must be passed to the
+        // underlying impl.connect() as own enumerable properties.
+        // tls.connect() internally spreads (`...options`), which only
+        // copies own enumerable properties, so options living on the
+        // prototype chain (as with Object.create) are silently dropped.
+
+        it("passes caller connectOptions as own enumerable properties", function () {
+            const config = merge(baseConfig, {
+                connectOptions: {
+                    rejectUnauthorized: false,
+                    ca: Buffer.from("dummy-cert"),
+                    servername: "irc.test.net"
+                }
+            });
+            const socket = new IrcSocket(config, MockSocket(logfn));
+            socket.connect();
+
+            const passed = socket.impl.connect.getCall(0).args[0];
+
+            // Own enumerable check == what tls.connect's spread sees.
+            const keys = Object.keys(passed);
+            assert(keys.indexOf("rejectUnauthorized") !== -1);
+            assert(keys.indexOf("ca") !== -1);
+            assert(keys.indexOf("servername") !== -1);
+
+            // Values (and non-JSON-serializable types like Buffer) survive intact.
+            const spread = Object.assign({}, passed);
+            assert(spread.rejectUnauthorized === false);
+            assert(Buffer.isBuffer(spread.ca));
+            assert(spread.servername === "irc.test.net");
+        });
+
+        it("does not mutate the caller's connectOptions object", function () {
+            const connectOptions = { rejectUnauthorized: false };
+            const config = merge(baseConfig, { connectOptions });
+            const socket = new IrcSocket(config, MockSocket(logfn));
+            socket.connect();
+
+            // port/host are set on our copy, not on the caller's object.
+            assert(!Object.prototype.hasOwnProperty.call(connectOptions, "port"));
+            assert(!Object.prototype.hasOwnProperty.call(connectOptions, "host"));
+        });
+    });
+
     describe("Startup Procedure", function () {
         it("Minimal config w/success", function () {
             const socket = new IrcSocket(baseConfig, MockSocket(logfn));
