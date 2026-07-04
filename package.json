@@ -5,7 +5,7 @@
   "main": "irc-socket.js",
   "private": false,
   "scripts": {
-    "test": "mocha test/irc-socket.js"
+    "test": "mocha test/irc-socket.js test/result.js"
   },
   "repository": "https://github.com/silverbucket/irc-socket.git",
   "keywords": [
